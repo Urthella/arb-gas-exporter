@@ -1,0 +1,22 @@
+{
+  "name": "arb-gas-exporter",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Prometheus exporter for Arbitrum's gas prices: L2 base fee, L1 price estimate, backlog and more, read from the ArbGasInfo precompile",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "typecheck": "tsc",
+    "test": "node --test test/*.test.ts",
+    "crosscheck": "node scripts/crosscheck.ts",
+    "start": "node src/main.ts"
+  },
+  "devDependencies": {
+    "@noble/hashes": "^2.4.0",
+    "@types/node": "^24.19.2",
+    "typescript": "^7.0.2"
+  }
+}
