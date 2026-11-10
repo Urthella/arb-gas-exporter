@@ -22,6 +22,9 @@ export const HELP: Record<string, string> = {
   gas_constraint_target_per_second: "Target gas per second of one multi-constraint pricing constraint (ArbOS 50+).",
   gas_constraint_backlog: "Backlog in gas of one multi-constraint pricing constraint (ArbOS 50+).",
   multigas_base_fee_wei: "Base fee per gas of one resource kind in multi-dimensional pricing (ArbOS 60+).",
+  eth_transfer_l1_gas_estimate:
+    "NodeInterface's estimate of the L1 gas a plain ETH transfer needs (padded by 10%, as wallets see it).",
+  eth_transfer_cost_estimate_wei: "A plain ETH transfer's estimated fee: (21000 + its L1 gas) times the base fee.",
 };
 
 function escape(value: string): string {

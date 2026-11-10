@@ -38,7 +38,7 @@ async function startExporter(args: string[]) {
 test("serves every chain's metrics and marks a broken RPC down", async () => {
   const good = await rpcServer((r) => [
     200,
-    { jsonrpc: "2.0", id: r.id, result: r.method === "eth_blockNumber" ? one.block : one.replies[r.params[0].data] },
+    { jsonrpc: "2.0", id: r.id, result: r.method === "eth_blockNumber" ? one.block : one.replies[r.params[0].data.slice(0, 10)] },
   ]);
   const broken = await rpcServer(() => [500, {}]);
   const limited = await rpcServer((r) => [200, { jsonrpc: "2.0", id: r.id, error: { code: -32005, message: "rate limited" } }]);
@@ -66,6 +66,7 @@ test("serves every chain's metrics and marks a broken RPC down", async () => {
     assert.match(exporter.log(), /limited: eth_blockNumber: rate limited/);
     assert.match(text, new RegExp(`^arbitrum_l2_base_fee_wei\\{chain="one"\\} ${BigInt(one.baseFeePerGas)}$`, "m"));
     assert.match(text, /^arbitrum_gas_constraint_backlog\{chain="one",constraint="0",window_seconds="9"\} \d+$/m);
+    assert.match(text, /^arbitrum_eth_transfer_l1_gas_estimate\{chain="one"\} 133$/m);
     assert.doesNotMatch(text, /arbitrum_l2_base_fee_wei\{chain="broken"/);
     assert.match(text, /^arbitrum_scrape_duration_seconds\{chain="broken"\} \d/m);
 
