@@ -32,7 +32,7 @@ scrape_configs:
       - targets: ["127.0.0.1:9850"]
 ```
 
-Each scrape reads every chain again; nothing is cached. That's nine `eth_call`s and one
+Each scrape reads every chain again; nothing is cached. That's ten `eth_call`s and one
 `eth_blockNumber` per chain per scrape.
 
 ## Metrics
@@ -57,6 +57,8 @@ Every metric is a gauge with a `chain` label.
 | `arbitrum_gas_constraint_target_per_second` | `constraint`, `window_seconds` | Target gas per second of one pricing constraint (ArbOS 50+). |
 | `arbitrum_gas_constraint_backlog` | `constraint`, `window_seconds` | Backlog in gas of one pricing constraint (ArbOS 50+). |
 | `arbitrum_multigas_base_fee_wei` | `resource` | Base fee per gas of one resource kind, such as `computation` or `storage_growth` (ArbOS 60+). |
+| `arbitrum_eth_transfer_l1_gas_estimate` | | NodeInterface's estimate of the L1 gas a plain ETH transfer needs, as wallets see it. |
+| `arbitrum_eth_transfer_cost_estimate_wei` | | A plain ETH transfer's estimated fee: (21000 + its L1 gas) times the base fee. |
 
 ## Notes
 
@@ -76,6 +78,16 @@ Every metric is a gauge with a `chain` label.
   - Nova has no constraints and still uses the single model.
 - **The surplus is signed.** Nova's was negative, a deficit, when the test fixture was
   captured.
+- **The transfer estimate runs high, on purpose.** It comes from
+  `NodeInterface.gasEstimateL1Component`, for a transfer to `0x…dEaD` with no calldata. It is
+  priced at the base fee that call returns: ArbOS's pricing state, which can differ slightly
+  from the block's own base fee.
+  - Nitro multiplies the estimate by `GasEstimationL1PricePadding`, which is 10%. The
+    interface's comment says this call doesn't pad, but the code does.
+  - Nitro also sizes the simulated transaction for a large gas limit.
+  - So real plain transfers pay less L1 gas than the estimate. In one check, Arbitrum One
+    estimated 129 while 8 real transfers paid 67 to 99. Nova estimated 1,019,345 while real
+    ones paid 724,379 to 772,010.
 - **Where the numbers come from.**
   - `arbOSVersion()` returns 55 plus the version, so 116 means ArbOS 61.
   - `getPricesInWei()` returns six values. The exporter takes the L1 cost of a simple
@@ -110,8 +122,12 @@ Every metric is a gauge with a `chain` label.
 - **A second provider, live.** `npm run crosscheck` reads Arbitrum One, Nova and Sepolia
   through Arbitrum's own RPCs. It then asks [PublicNode](https://www.publicnode.com) for the
   header of that exact block. The base fee must match it, and both providers must report the
-  same ArbOS version and floor. All 9 checks passed.
-- **Mutation testing.** Twenty-two deliberate bugs were planted one at a time, and the tests
+  same ArbOS version and floor.
+- **Real transfers, live.** The cross-check also reads the receipts of recent plain ETH
+  transfers. It keeps those whose gas is exactly 21000 plus their `gasUsedForL1`. The
+  transfer estimate must fall between those transfers' median L1 gas and 2.5 times it.
+  All 12 checks passed.
+- **Mutation testing.** Twenty-seven deliberate bugs were planted one at a time, and the tests
   caught every one. The bugs included:
   - the wrong version offset;
   - unsigned surplus;
@@ -119,7 +135,9 @@ Every metric is a gauge with a `chain` label.
   - swapped constraint fields;
   - an ignored array length;
   - a failed price read treated as fine;
-  - unescaped labels.
+  - unescaped labels;
+  - the transfer cost without its 21000;
+  - the transfer's calldata encoded wrong.
 
 ## Develop
 

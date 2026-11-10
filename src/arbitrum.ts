@@ -3,6 +3,13 @@
 
 export const ARB_SYS = "0x0000000000000000000000000000000000000064";
 export const ARB_GAS_INFO = "0x000000000000000000000000000000000000006c";
+/** Not a real contract: Nitro answers eth_calls to this address itself. */
+export const NODE_INTERFACE = "0x00000000000000000000000000000000000000c8";
+
+const pad = (hex: string) => hex.padStart(64, "0");
+/** gasEstimateL1Component's arguments for a plain ETH transfer: to 0x…dEaD, not a contract
+ * creation, and empty calldata (an offset of 0x60 to a zero length). */
+export const TRANSFER_ARGS = [pad("dead"), pad("0"), pad("60"), pad("0")].join("");
 
 /** Each function's selector: the first four bytes of the Keccak-256 of its signature. */
 export const SELECTORS = {
@@ -15,6 +22,7 @@ export const SELECTORS = {
   "getGasAccountingParams()": "0x612af178",
   "getGasPricingConstraints()": "0x232027d1",
   "getMultiGasBaseFee()": "0xc0e10bbb",
+  "gasEstimateL1Component(address,bool,bytes)": "0x77d488a2",
 } as const;
 type Signature = keyof typeof SELECTORS;
 
@@ -74,8 +82,8 @@ export function array(hex: unknown, width: number): bigint[][] {
 export async function scrape(rpc: Rpc): Promise<Sample[]> {
   const block = await rpc("eth_blockNumber", []);
   if (typeof block !== "string" || !/^0x[0-9a-fA-F]+$/.test(block)) throw new Error("no block number");
-  const call = (to: string, signature: Signature) =>
-    rpc("eth_call", [{ to, data: SELECTORS[signature] }, block]);
+  const call = (to: string, signature: Signature, args = "") =>
+    rpc("eth_call", [{ to, data: SELECTORS[signature] + args }, block]);
   const gas = (signature: Signature) => call(ARB_GAS_INFO, signature);
 
   const [prices, ...optional] = await Promise.allSettled([
@@ -88,6 +96,7 @@ export async function scrape(rpc: Rpc): Promise<Sample[]> {
     gas("getGasAccountingParams()"),
     gas("getGasPricingConstraints()"),
     gas("getMultiGasBaseFee()"),
+    call(NODE_INTERFACE, "gasEstimateL1Component(address,bool,bytes)", TRANSFER_ARGS),
   ]);
   if (prices.status === "rejected") throw prices.reason;
   const [perSimpleTx, perCalldataByte, perStorageSlot, , , baseFee] = fixed(prices.value, 6);
@@ -120,6 +129,15 @@ export async function scrape(rpc: Rpc): Promise<Sample[]> {
         labels: { resource: RESOURCE_KINDS[i] ?? `kind_${i}` },
         value: fee,
       })),
+    (hex) => {
+      // Nitro's estimate is padded by 10% and sized for a worst-case transaction; the base fee
+      // it divides by is the one in ArbOS's pricing state, so the cost uses that one too.
+      const [l1Gas, baseFee] = fixed(hex, 3);
+      return [
+        { name: "eth_transfer_l1_gas_estimate", value: l1Gas },
+        { name: "eth_transfer_cost_estimate_wei", value: (21_000n + l1Gas) * baseFee },
+      ];
+    },
   ];
   optional.forEach((result, i) => {
     if (result.status === "rejected") return;

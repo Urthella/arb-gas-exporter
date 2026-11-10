@@ -37,6 +37,28 @@ async function header(other: Rpc, block: bigint): Promise<{ baseFeePerGas: strin
   }
 }
 
+interface Tx {
+  hash: string;
+  to: string | null;
+  input: string;
+  value: string;
+}
+
+/** The L1 gas that real plain ETH transfers paid in the blocks up to `block`, from receipts. */
+async function realTransfers(chain: Rpc, block: bigint): Promise<bigint[]> {
+  const used: bigint[] = [];
+  for (let b = block; used.length < 8 && b > block - 60n; b--) {
+    const found = (await chain("eth_getBlockByNumber", ["0x" + b.toString(16), true])) as { transactions: Tx[] } | null;
+    for (const tx of found?.transactions ?? []) {
+      if (used.length >= 8 || tx.input !== "0x" || !tx.to || BigInt(tx.value) === 0n) continue;
+      const receipt = (await chain("eth_getTransactionReceipt", [tx.hash])) as { gasUsed: string; gasUsedForL1: string };
+      // A transfer to a contract runs code; only 21000 + the L1 part is a plain transfer.
+      if (BigInt(receipt.gasUsed) === 21_000n + BigInt(receipt.gasUsedForL1)) used.push(BigInt(receipt.gasUsedForL1));
+    }
+  }
+  return used.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+}
+
 let failed = 0;
 for (const [chain, primary, secondary] of CHAINS) {
   const ours = await scrape(rpc(primary));
@@ -53,6 +75,20 @@ for (const [chain, primary, secondary] of CHAINS) {
     if (!ok) failed++;
     console.log(`${ok ? "ok  " : "FAIL"} ${chain}: ${what}: ${a}${ok ? "" : ` vs ${b}`}`);
   }
+
+  // NodeInterface pads its estimate by 10% and sizes it for a worst-case transaction, so it
+  // should sit at or above what real transfers paid, but not wildly so.
+  const estimate = get(ours, "eth_transfer_l1_gas_estimate") as bigint | undefined;
+  const real = await realTransfers(rpc(primary), block);
+  if (real.length === 0) {
+    console.log(`skip ${chain}: no plain transfers in the last 60 blocks`);
+    continue;
+  }
+  const median = real[real.length >> 1];
+  const ok = estimate !== undefined && estimate >= median && estimate <= (median * 5n) / 2n;
+  if (!ok) failed++;
+  const range = `${real.length} real transfers paid ${real[0]} to ${real.at(-1)}, median ${median}`;
+  console.log(`${ok ? "ok  " : "FAIL"} ${chain}: transfer L1 gas estimate ${estimate}; ${range}`);
 }
 if (failed) {
   console.log(`${failed} check(s) failed`);
